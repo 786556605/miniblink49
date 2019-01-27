@@ -7,6 +7,7 @@
 #include "wke/wkeWebView.h"
 #include "wke/wkeWebWindow.h"
 #include "wke/wkeGlobalVar.h"
+#include "wke/wke2.h"
 #include "content/browser/WebPage.h"
 #include "content/web_impl_win/BlinkPlatformImpl.h"
 #include "content/web_impl_win/WebThreadImpl.h"
@@ -30,6 +31,7 @@
 #include "gen/blink/platform/RuntimeEnabledFeatures.h"
 #include "wtf/text/WTFString.h"
 #include "wtf/text/WTFStringUtil.h"
+#include "wtf/text/Base64.h"
 #include <v8.h>
 #include <shlwapi.h>
 
@@ -122,8 +124,8 @@ void wkeConfigure(const wkeSettings* settings)
         return;
     if (settings->mask & WKE_SETTING_PROXY)
         wkeSetProxy(&settings->proxy);
-    if (settings->mask & WKE_SETTING_PAINTCALLBACK_IN_OTHER_THREAD)
-        blink::RuntimeEnabledFeatures::setUpdataInOtherThreadEnabled(true);
+//     if (settings->mask & WKE_SETTING_PAINTCALLBACK_IN_OTHER_THREAD)
+//         blink::RuntimeEnabledFeatures::setUpdataInOtherThreadEnabled(true);
 }
 
 void wkeInitializeEx(const wkeSettings* settings)
@@ -206,9 +208,33 @@ void wkeSetDragDropEnable(wkeWebView webView, bool b)
     wke::g_isSetDragDropEnable = b;
 }
 
+static std::vector<char> convertCookiesPathToUtf8(const WCHAR* path)
+{
+    std::wstring pathStr(path);
+    if (pathStr[pathStr.size() - 1] != L'\\' && pathStr[pathStr.size() - 1] != L'/')
+        pathStr += L'\\';
+    if (!::PathIsDirectoryW(pathStr.c_str()))
+        return std::vector<char>();
+    pathStr += L"cookies.dat";
+
+    std::vector<char> pathStrA;
+    WTF::WCharToMByte(pathStr.c_str(), pathStr.size(), &pathStrA, CP_ACP);
+    if (0 == pathStrA.size())
+        return std::vector<char>();
+    pathStrA.push_back('\0');
+
+    return pathStrA;
+}
+
 void wkeSetDebugConfig(wkeWebView webview, const char* debugString, const char* param)
 {
     wke::checkThreadCallIsValid(__FUNCTION__);
+
+    if (nullptr != strstr(debugString, "paintcallbackInOtherThread")) {
+        blink::RuntimeEnabledFeatures::setUpdataInOtherThreadEnabled(true);
+        return;
+    }
+
     content::WebPage* webpage = nullptr;
     blink::WebViewImpl* webViewImpl = nullptr;
     blink::WebSettingsImpl* settings = nullptr;
@@ -260,7 +286,7 @@ void wkeSetDebugConfig(wkeWebView webview, const char* debugString, const char* 
             wke::g_contentScale = atoi(param) / 100.0;
         } else if ("antiAlias" == item) {
             wke::g_rendererAntiAlias = atoi(param) == 1;
-        }
+        } 
     }
 }
 
@@ -701,11 +727,11 @@ void wkePerformCookieCommand(wkeWebView webView, wkeCookieCommand command)
     if (!curl)
         return;
 
-    std::string cookiesData = webView->getCookieJarPath();
+    std::string cookiesPath = webView->getCookieJarPath();
     CURLSH* curlsh = webView->getCurlShareHandle();
 
     curl_easy_setopt(curl, CURLOPT_SHARE, curlsh);
-    curl_easy_setopt(curl, CURLOPT_COOKIEJAR, cookiesData.c_str());
+    curl_easy_setopt(curl, CURLOPT_COOKIEJAR, cookiesPath.c_str());
     
     switch (command) {
     case wkeCookieCommandClearAllCookies:
@@ -717,7 +743,7 @@ void wkePerformCookieCommand(wkeWebView webView, wkeCookieCommand command)
     case wkeCookieCommandFlushCookiesToFile:
         curl_easy_setopt(curl, CURLOPT_COOKIELIST, "FLUSH");
         break;
-    case wkeCookieCommandReloadCookiesFromFile :
+    case wkeCookieCommandReloadCookiesFromFile:
         curl_easy_setopt(curl, CURLOPT_COOKIELIST, "RELOAD");
         break;
     }
@@ -741,16 +767,15 @@ void wkeSetCookieJarPath(wkeWebView webView, const WCHAR* path)
     wke::checkThreadCallIsValid(__FUNCTION__);
     if (!path)
         return;
-    std::wstring pathStr(path);
+    
     net::WebURLLoaderManager* manager = net::WebURLLoaderManager::sharedInstance();
     if (!manager)
         return;
-    if (pathStr[pathStr.size() - 1] != L'\\' && pathStr[pathStr.size() - 1] != L'/')
-        pathStr += L'\\';
-    if (!::PathIsDirectoryW(pathStr.c_str()))
+
+    std::vector<char> pathStrA = convertCookiesPathToUtf8(path);
+    if (pathStrA.size() == 0)
         return;
-    pathStr += L"cookies.dat";
-    manager->getShareCookieJar()->setCookieJarFullPath(pathStr.c_str());
+    net::WebURLLoaderManager::setCookieJarFullPath(&pathStrA[0]);
 }
 
 void wkeSetCookieJarFullPath(wkeWebView webView, const WCHAR* path)
@@ -758,13 +783,18 @@ void wkeSetCookieJarFullPath(wkeWebView webView, const WCHAR* path)
     wke::checkThreadCallIsValid(__FUNCTION__);
     if (!path)
         return;
-    net::WebURLLoaderManager* manager = net::WebURLLoaderManager::sharedInstance();
-    if (!manager)
+
+    std::vector<char> jarPathA;
+    WTF::WCharToMByte(path, wcslen(path), &jarPathA, CP_ACP);
+    if (0 == jarPathA.size())
         return;
-    manager->getShareCookieJar()->setCookieJarFullPath(path);
+    jarPathA.push_back('\0');
+    net::WebURLLoaderManager::setCookieJarFullPath(&jarPathA[0]);
 }
 
-String* kLocalStorageFullPath = nullptr;
+namespace net {
+extern String* kDefaultLocalStorageFullPath;
+}
 
 void wkeSetLocalStorageFullPath(wkeWebView webView, const WCHAR* path)
 {
@@ -772,17 +802,18 @@ void wkeSetLocalStorageFullPath(wkeWebView webView, const WCHAR* path)
     if (!path)
         return;
 
-    if (kLocalStorageFullPath)
-        delete kLocalStorageFullPath;
-    kLocalStorageFullPath = new String(path);
-    if (kLocalStorageFullPath->isEmpty()) {
-        delete kLocalStorageFullPath;
-        kLocalStorageFullPath = nullptr;
+    if (net::kDefaultLocalStorageFullPath)
+        delete net::kDefaultLocalStorageFullPath;
+    net::kDefaultLocalStorageFullPath = new String(path);
+
+    if (net::kDefaultLocalStorageFullPath->isEmpty()) {
+        delete net::kDefaultLocalStorageFullPath;
+        net::kDefaultLocalStorageFullPath = nullptr;
         return;
     }
 
-    if (!kLocalStorageFullPath->endsWith(L'\\'))
-        kLocalStorageFullPath->append(L'\\');
+    if (!net::kDefaultLocalStorageFullPath->endsWith(L'\\'))
+        net::kDefaultLocalStorageFullPath->append(L'\\');
 }
 
 void wkeAddPluginDirectory(wkeWebView webView, const WCHAR* path)
@@ -852,7 +883,10 @@ void wkeSetFocus(wkeWebView webView)
     if (!webView)
         return;
     webView->setFocus();
-    OutputDebugStringA("wkeSetFocus\n");
+
+    if (webView->windowHandle())
+        ::SetFocus(webView->windowHandle());
+    //OutputDebugStringA("wkeSetFocus\n");
 }
 
 void wkeKillFocus(wkeWebView webView)
@@ -861,7 +895,7 @@ void wkeKillFocus(wkeWebView webView)
     if (!webView)
         return;
     webView->killFocus();
-    OutputDebugStringA("killFocus\n");
+    //OutputDebugStringA("killFocus\n");
 }
 
 wkeRect wkeGetCaretRect(wkeWebView webView)
@@ -916,7 +950,6 @@ void wkeWake(wkeWebView webView)
 
     content::WebThreadImpl* threadImpl = (content::WebThreadImpl*)(blink::Platform::current()->currentThread());
     threadImpl->fire();
-
 }
 
 bool wkeIsAwake(wkeWebView webView)
@@ -1040,6 +1073,12 @@ void wkeOnDownload(wkeWebView webView, wkeDownloadCallback callback, void* param
     webView->onDownload(callback, param);
 }
 
+void wkeOnDownload2(wkeWebView webView, wkeDownload2Callback callback, void* param)
+{
+    wke::checkThreadCallIsValid(__FUNCTION__);
+    webView->onDownload2(callback, param);
+}
+
 void wkeNetOnResponse(wkeWebView webView, wkeNetResponseCallback callback, void* param)
 {
     wke::checkThreadCallIsValid(__FUNCTION__);
@@ -1101,6 +1140,12 @@ void wkeOnStartDragging(wkeWebView webView, wkeStartDraggingCallback callback, v
 {
     wke::checkThreadCallIsValid(__FUNCTION__);
     webView->onStartDragging(callback, param);
+}
+
+void wkeOnPrint(wkeWebView webView, wkeOnPrintCallback callback, void* param)
+{
+    wke::checkThreadCallIsValid(__FUNCTION__);
+    webView->onPrint(callback, param);
 }
 
 void wkeOnWillMediaLoad(wkeWebView webView, wkeWillMediaLoadCallback callback, void* callbackParam)
@@ -1458,10 +1503,11 @@ void wkeNodeOnCreateProcess(wkeWebView webWindow, wkeNodeOnCreateProcessCallback
     g_wkeNodeOnCreateProcessCallbackparam = param;
 }
 
-static String memBufToString(wkeMemBuf* stringType) {
+static String memBufToString(wkeMemBuf* stringType)
+{
     if (!stringType || !stringType->length)
         return String();
-    return String((const char*)stringType->data, stringType->length);
+    return blink::WebString::fromUTF8((const char*)stringType->data, stringType->length);
 }
 
 static void convertDragData(blink::WebDragData* data, const wkeWebDragData* webDragData)
@@ -1661,6 +1707,16 @@ void wkeSetMediaPlayerFactory(wkeWebView webView, wkeMediaPlayerFactory factory,
 const utf8* wkeUtilDecodeURLEscape(const utf8* url)
 {
     String result = blink::decodeURLEscapeSequences(url);
+    if (result.isNull() || result.isEmpty())
+        return url;
+    Vector<char> buffer = WTF::ensureStringToUTF8(result, false);
+    const char* resultStr = wke::createTempCharString((const char*)buffer.data(), buffer.size());
+    return resultStr;
+}
+
+const utf8* wkeUtilEncodeURLEscape(const utf8* url)
+{
+    String result = blink::encodeWithURLEscapeSequences(String::fromUTF8(url));
     if (result.isNull() || result.isEmpty())
         return url;
     Vector<char> buffer = WTF::ensureStringToUTF8(result, false);
@@ -1934,6 +1990,45 @@ const utf8* wkeToString(const wkeString string)
 const wchar_t* wkeToStringW(const wkeString string)
 {
     return wkeGetStringW(string);
+}
+
+const utf8* wkeUtilBase64Encode(const utf8* str)
+{
+    if (!str)
+        return nullptr;
+
+    CString inStr(str);
+    String result = WTF::base64Encode(inStr, WTF::Base64InsertLFs);
+
+    if (result.isNull() || result.isEmpty() || !result.is8Bit())
+        return nullptr;
+    return wke::createTempCharString((const char *)(result.characters8()), result.length());
+}
+
+const utf8* wkeUtilBase64Decode(const utf8* str)
+{
+    CString inStr(str);
+    Vector<char> result;
+    bool ok = WTF::base64Decode(str, strlen(str), result);
+
+    if (!ok || 0 == result.size())
+        return nullptr;
+    return wke::createTempCharString(result.data(), result.size());
+}
+
+void wkeRunMessageLoop()
+{
+    MSG msg = { 0 };
+    while (true) {
+        if (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+            if (WM_QUIT == msg.message)
+                break;
+            ::TranslateMessage(&msg);
+            ::DispatchMessageW(&msg);
+        }
+        wkeWake(nullptr);
+        ::Sleep(2);
+    }
 }
 
 // V1 API end

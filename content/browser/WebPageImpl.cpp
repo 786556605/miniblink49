@@ -595,11 +595,11 @@ void WebPageImpl::doClose()
 
 
     if (m_hWnd) {
-        if (::IsWindow(m_hWnd)) {
+        if (::IsWindow(m_hWnd)) { // 多线程渲染时，ui线程先销毁窗口，再走到此处
             ::RevokeDragDrop(m_hWnd);
             ASSERT(0 == m_dragHandle->getRefCount());
         } else {
-            ASSERT(1 == m_dragHandle->getRefCount());
+            ASSERT(0 == m_dragHandle->getRefCount());
         }
     }
 
@@ -946,7 +946,7 @@ bool WebPageImpl::isDrawDirty()
     return false;
 }
 
-void drawDebugLine(SkCanvas* memoryCanvas, const IntRect& paintRect)
+void drawDebugLine(void* ptr, SkCanvas* memoryCanvas, const IntRect& paintRect)
 {
     static int g_debugCount = 0;
     ++g_debugCount;
@@ -963,7 +963,7 @@ void drawDebugLine(SkCanvas* memoryCanvas, const IntRect& paintRect)
 #endif
 
 #if 0
-    String outString = String::format("drawDebugLine:%d %d %d %d, %d\n", paintRect.x(), paintRect.y(), paintRect.width(), paintRect.height(), g_debugCount);
+    String outString = String::format("drawDebugLine:%p, %d %d %d %d, %d\n", ptr, paintRect.x(), paintRect.y(), paintRect.width(), paintRect.height(), g_debugCount);
     OutputDebugStringW(outString.charactersWithNullTermination().data());
 #endif
 }
@@ -1104,7 +1104,7 @@ void WebPageImpl::paintToMemoryCanvasInUiThread(SkCanvas* canvas, const IntRect&
     HDC hMemoryDC = nullptr;
     hMemoryDC = skia::BeginPlatformPaint(hWnd, canvas);
 
-    drawDebugLine(canvas, paintRect);
+    drawDebugLine(this, canvas, paintRect);
     
     g_paintToMemoryCanvasInUiThreadCount++;
 
@@ -1827,12 +1827,14 @@ void WebPageImpl::setHWND(HWND hWnd)
     if (threadID != ::GetCurrentThreadId())
         PostTaskWrap::init();
     
-    if (wke::g_wkeUiThreadPostTaskCallback) {
-        m_dragHandle->setViewWindow(m_hWnd, m_webViewImpl);
-        wke::g_wkeUiThreadPostTaskCallback(m_hWnd, RegisterDragDropTask::registerDragDropInUiThread, new RegisterDragDropTask(m_pagePtr->wkeWebView()->getId(), m_hWnd, m_dragHandle));
-    } else if (!blink::RuntimeEnabledFeatures::updataInOtherThreadEnabled()) {
-        m_dragHandle->setViewWindow(m_hWnd, m_webViewImpl);
-        ::RegisterDragDrop(m_hWnd, m_dragHandle);
+    if (wke::g_isSetDragDropEnable) {
+        if (wke::g_wkeUiThreadPostTaskCallback) {
+            m_dragHandle->setViewWindow(m_hWnd, m_webViewImpl);
+            wke::g_wkeUiThreadPostTaskCallback(m_hWnd, RegisterDragDropTask::registerDragDropInUiThread, new RegisterDragDropTask(m_pagePtr->wkeWebView()->getId(), m_hWnd, m_dragHandle));
+        } else if (!blink::RuntimeEnabledFeatures::updataInOtherThreadEnabled()) {
+            m_dragHandle->setViewWindow(m_hWnd, m_webViewImpl);
+            ::RegisterDragDrop(m_hWnd, m_dragHandle);
+        }
     }
 }
 
@@ -1926,6 +1928,15 @@ WebStorageNamespace* WebPageImpl::createSessionStorageNamespace()
     return ((content::BlinkPlatformImpl*)Platform::current())->createSessionStorageNamespace();
 }
 
+#ifndef MINIBLINK_NO_PAGE_LOCALSTORAGE
+WebStorageNamespace* WebPageImpl::createLocalStorageNamespace()
+{
+    if (!m_pageNetExtraData)
+        m_pageNetExtraData = new net::PageNetExtraData();
+    return m_pageNetExtraData->createWebStorageNamespace();
+}
+#endif
+
 WebString WebPageImpl::acceptLanguages()
 {
     if (m_webViewImpl) {
@@ -1984,6 +1995,14 @@ void WebPageImpl::onMouseDown(const blink::WebNode& mouseDownNode)
 {
     if (mouseDownNode.isDraggable())
         m_platformEventHandler->setIsDraggableNodeMousedown();
+}
+
+void WebPageImpl::printPage(blink::WebLocalFrame* frame)
+{
+    wkeWebFrameHandle handle = wke::CWebView::frameIdTowkeWebFrameHandle(m_pagePtr, getFrameIdByBlinkFrame(frame));
+
+    if (m_pagePtr->wkeHandler().printCallback)
+        m_pagePtr->wkeHandler().printCallback(m_pagePtr->wkeWebView(), m_pagePtr->wkeHandler().printCallbackParam, handle, nullptr);
 }
 
 void WebPageImpl::draggableRegionsChanged()
@@ -2124,11 +2143,18 @@ void WebPageImpl::didExitDebugLoop()
         m_webViewImpl->setIgnoreInputEvents(true);
 }
 
-void WebPageImpl::setCookieJarPath(const char* path)
+void WebPageImpl::setCookieJarFullPath(const char* path)
 {
     if (!m_pageNetExtraData)
         m_pageNetExtraData = new net::PageNetExtraData();
     m_pageNetExtraData->setCookieJarFullPath(path);
+}
+
+void WebPageImpl::setLocalStorageFullPath(const char* path)
+{
+    if (!m_pageNetExtraData)
+        m_pageNetExtraData = new net::PageNetExtraData();
+    m_pageNetExtraData->setLocalStorageFullPath(path);
 }
 
 bool WebPageImpl::initSetting()
@@ -2138,7 +2164,8 @@ bool WebPageImpl::initSetting()
         return false;
     settings->setTextAreasAreResizable(true);
     
-    settings->setStandardFontFamily(WebString(L"微软雅黑", 4));
+    //settings->setStandardFontFamily(WebString(L"微软雅黑", 4));
+    settings->setStandardFontFamily(blink::WebString(L"宋体", 2));
     settings->setUsesEncodingDetector(true);
     settings->setJavaScriptEnabled(true);
     settings->setAllowFileAccessFromFileURLs(true);
@@ -2155,6 +2182,7 @@ bool WebPageImpl::initSetting()
     settings->setPluginsEnabled(true);
     settings->setJavaScriptCanOpenWindowsAutomatically(true);
     settings->setJavaScriptCanAccessClipboard(true);
+    settings->setPrimaryPointerType(blink::WebSettings::PointerTypeFine);
 
     PluginDatabase::installedPlugins()->refresh();
 

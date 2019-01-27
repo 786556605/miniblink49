@@ -28,7 +28,7 @@ public:
             return;
 
         IoTask* task = new IoTask(m_manager, m_thread, true);
-        m_thread->postDelayedTask(FROM_HERE, task, 1);
+        m_thread->postTask(FROM_HERE, task);
     }
 
 private:
@@ -90,7 +90,10 @@ public:
             String tempPath = m_manager->handleHeaderForBlobOnMainThread(job, job->m_asynWkeNetSetData->size());
             job->m_response.setDownloadFilePath(tempPath);
         }
-        // job->client()->didReceiveResponse(job->loader(), job->m_response);
+
+        job->m_response.setHTTPStatusCode(200);
+        job->m_response.setHTTPStatusText(blink::WebString::fromUTF8("OK"));
+
         m_manager->handleDidReceiveResponse(job);
 
         if (job->m_asynWkeNetSetData && kNormalCancelled != job->m_cancelledReason) { // 可能在didReceiveResponse里被cancel

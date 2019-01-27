@@ -2,6 +2,7 @@
 #define content_browser_ContextMeun_h
 
 #include "content/browser/WebPage.h"
+#include "content/web_impl_win/WebThreadImpl.h"
 #include "third_party/WebKit/Source/web/WebViewImpl.h"
 #include "third_party/WebKit/Source/platform/Timer.h"
 #include "third_party/WebKit/public/web/WebContextMenuData.h"
@@ -65,7 +66,9 @@ public:
     }
 
     enum MenuId {
-        kCopySelectedTextId,
+        kSelectedAllId,
+        kSelectedTextId,
+        kUndoId,
         kCopyImageId,
         kInspectElementAtId,
         kCutId,
@@ -94,9 +97,9 @@ public:
         m_popMenu = ::CreatePopupMenu();
         
         m_data = blink::WebContextMenuData();
-
+        
         if ((!data.selectedText.isNull() && !data.selectedText.isEmpty()))
-            ::AppendMenu(m_popMenu, MF_STRING, kCopySelectedTextId, L"复制");
+            ::AppendMenu(m_popMenu, MF_STRING, kSelectedTextId, L"复制");
 
         if (data.hasImageContents) {
             ::AppendMenu(m_popMenu, MF_STRING, kCopyImageId, L"复制图片");
@@ -109,6 +112,8 @@ public:
         if (data.isEditable) {
             ::AppendMenu(m_popMenu, MF_STRING, kCutId, L"剪切");
             ::AppendMenu(m_popMenu, MF_STRING, kPasteId, L"粘贴");
+            ::AppendMenu(m_popMenu, MF_STRING, kSelectedAllId, L"全选");
+            ::AppendMenu(m_popMenu, MF_STRING, kUndoId, L"撤销");
         }
 
         if (0 == ::GetMenuItemCount(m_popMenu)) {
@@ -127,8 +132,15 @@ public:
 
     void onCommand(UINT itemID)
     {
-        if (kCopySelectedTextId == itemID) {
+        content::WebThreadImpl* threadImpl = (content::WebThreadImpl*)(blink::Platform::current()->currentThread());
+        threadImpl->fire();
+
+        if (kSelectedTextId == itemID) {
             m_webPage->webViewImpl()->focusedFrame()->executeCommand("Copy");
+        } else if (kSelectedAllId == itemID) {
+            m_webPage->webViewImpl()->focusedFrame()->executeCommand("SelectAll");
+        } else if (kUndoId == itemID) {
+            m_webPage->webViewImpl()->focusedFrame()->executeCommand("Undo");
         } else if (kCopyImageId == itemID) {
             m_webPage->webViewImpl()->copyImageAt(*m_imagePos);
             delete m_imagePos;

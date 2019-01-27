@@ -59,9 +59,12 @@ typedef enum {
 #ifndef HAVE_WCHAR_T
 typedef unsigned short wchar_t;
 #endif
-#endif
 
-#include <stdbool.h>
+#define bool	_Bool
+#define false	0
+#define true	1
+
+#endif
 
 #if defined(__cplusplus)
 #define WKE_EXTERN_C extern "C" 
@@ -99,9 +102,14 @@ typedef wke::WkeMediaPlayer* wkeMediaPlayer;
 
 namespace wke { class WkeMediaPlayerClient; };
 typedef wke::WkeMediaPlayerClient* wkeMediaPlayerClient;
+
+namespace blink { class WebURLRequest; };
+typedef blink::WebURLRequest* blinkWebURLRequestPtr;
+
 #else
 typedef struct _tagWkeMediaPlayer* wkeMediaPlayer;
 typedef struct _tagWkeMediaPlayerClient* wkeMediaPlayerClient;
+typedef struct _tabblinkWebURLRequestPtr* blinkWebURLRequestPtr;
 #endif
 
 typedef enum {
@@ -287,7 +295,7 @@ typedef struct {
 
         // Only valid when storageType == StorageTypeFileSystemFile.
         wkeMemBuf* fileSystemURL;
-        long long fileSystemFileSize;
+        __int64 fileSystemFileSize;
 
         // Only valid when stringType == "text/html".
         wkeMemBuf* baseURL;
@@ -355,23 +363,26 @@ typedef struct {
     wkeHttBodyElementType type;
     wkeMemBuf* data;
     wkeString filePath;
-    long long fileStart;
-    long long fileLength; // -1 means to the end of the file.
+    __int64 fileStart;
+    __int64 fileLength; // -1 means to the end of the file.
 } wkePostBodyElement;
 
-typedef struct {
+typedef struct _wkePostBodyElements {
     int size;
     wkePostBodyElement** element;
     size_t elementSize;
     bool isDirty;
 } wkePostBodyElements;
 
-typedef struct {
+typedef void* wkeNetJob;
+
+typedef struct _wkeTempCallbackInfo {
     int size;
     wkeWebFrameHandle frame;
     wkeWillSendRequestInfo* willSendRequestInfo;
     const char* url;
     wkePostBodyElements* postBody;
+    wkeNetJob job;
 } wkeTempCallbackInfo;
 
 typedef enum _wkeRequestType {
@@ -380,6 +391,31 @@ typedef enum _wkeRequestType {
     kWkeRequestTypePost,
     kWkeRequestTypePut,
 } wkeRequestType;
+
+typedef struct _wkePdfDatas {
+    int count;
+    size_t* sizes;
+    const void** datas;
+} wkePdfDatas;
+
+typedef struct _wkePrintSettings {
+    int structSize;
+    int dpi;
+    int width;
+    int height;
+    int marginTop;
+    int marginBottom;
+    int marginLeft;
+    int marginRight;
+    BOOL isPrintPageHeadAndFooter;
+    BOOL isPrintBackgroud;
+} wkePrintSettings;
+
+typedef struct _wkeScreenshotSettings {
+    int structSize;
+    int width;
+    int height;
+} wkeScreenshotSettings;
 
 typedef void(WKE_CALL_TYPE*wkeTitleChangedCallback)(wkeWebView webView, void* param, const wkeString title);
 typedef void(WKE_CALL_TYPE*wkeURLChangedCallback)(wkeWebView webView, void* param, const wkeString url);
@@ -398,6 +434,8 @@ typedef void(WKE_CALL_TYPE*wkeOnShowDevtoolsCallback)(wkeWebView webView, void* 
 
 typedef void(WKE_CALL_TYPE*wkeNodeOnCreateProcessCallback)(wkeWebView webView, void* param, const WCHAR* applicationPath, const WCHAR* arguments, STARTUPINFOW* startup);
 typedef void(WKE_CALL_TYPE*wkeOnPluginFindCallback)(wkeWebView webView, void* param, const utf8* mime, void* initializeFunc, void* getEntryPointsFunc, void* shutdownFunc);
+
+typedef void(WKE_CALL_TYPE*wkeOnPrintCallback)(wkeWebView webView, void* param, wkeWebFrameHandle frameId, void* printParams);
 
 typedef struct {
     int size;
@@ -420,7 +458,7 @@ typedef void(WKE_CALL_TYPE*wkeStartDraggingCallback)(
 typedef void(WKE_CALL_TYPE*wkeUiThreadRunCallback)(HWND hWnd, void* param);
 typedef int(WKE_CALL_TYPE*wkeUiThreadPostTaskCallback)(HWND hWnd, wkeUiThreadRunCallback callback, void* param);
 
-typedef enum {
+typedef enum _wkeOtherLoadType {
     WKE_DID_START_LOADING,
     WKE_DID_STOP_LOADING,
     WKE_DID_NAVIGATE,
@@ -431,14 +469,37 @@ typedef enum {
 } wkeOtherLoadType;
 typedef void(WKE_CALL_TYPE*wkeOnOtherLoadCallback)(wkeWebView webView, void* param, wkeOtherLoadType type, wkeTempCallbackInfo* info);
 
-typedef enum {
+typedef enum _wkeLoadingResult {
     WKE_LOADING_SUCCEEDED,
     WKE_LOADING_FAILED,
     WKE_LOADING_CANCELED
 } wkeLoadingResult;
 
+typedef enum _wkeDownloadOpt {
+    kWkeDownloadOptCancel,
+    kWkeDownloadOptCacheData,
+} wkeDownloadOpt;
+
+typedef void(WKE_CALL_TYPE*wkeNetJobDataRecvCallback)(void* ptr, wkeNetJob job, const char* data, int length);
+typedef void(WKE_CALL_TYPE*wkeNetJobDataFinishCallback)(void* ptr, wkeNetJob job, wkeLoadingResult result);
+
+typedef struct _wkeNetJobDataBind {
+    void* ptr;
+    wkeNetJobDataRecvCallback recvCallback;
+    wkeNetJobDataFinishCallback finishCallback;
+}wkeNetJobDataBind;
+
 typedef void(WKE_CALL_TYPE*wkeLoadingFinishCallback)(wkeWebView webView, void* param, const wkeString url, wkeLoadingResult result, const wkeString failedReason);
 typedef bool(WKE_CALL_TYPE*wkeDownloadCallback)(wkeWebView webView, void* param, const char* url);
+typedef wkeDownloadOpt(WKE_CALL_TYPE*wkeDownload2Callback)(
+    wkeWebView webView, 
+    void* param,
+    size_t expectedContentLength,
+    const char* url, 
+    const char* mime, 
+    const char* disposition, 
+    wkeNetJob job, 
+    wkeNetJobDataBind* dataBind);
 
 typedef enum {
     wkeLevelDebug = 4,
@@ -458,7 +519,6 @@ typedef wkeMediaPlayer(WKE_CALL_TYPE* wkeMediaPlayerFactory)(wkeWebView webView,
 typedef bool(WKE_CALL_TYPE* wkeOnIsMediaPlayerSupportsMIMEType)(const utf8* mime);
 
 //wkeNet--------------------------------------------------------------------------------------
-typedef void* wkeNetJob;
 
 typedef struct wkeWebUrlRequest* wkeWebUrlRequestPtr;
 typedef struct wkeWebUrlResponse* wkeWebUrlResponsePtr;
@@ -1000,6 +1060,7 @@ public:
     ITERATOR3(void, wkeOnDocumentReady2, wkeWebView webView, wkeDocumentReady2Callback callback, void* param, "") \
     ITERATOR3(void, wkeOnLoadingFinish, wkeWebView webView, wkeLoadingFinishCallback callback, void* param, "") \
     ITERATOR3(void, wkeOnDownload, wkeWebView webView, wkeDownloadCallback callback, void* param, "") \
+    ITERATOR3(void, wkeOnDownload2, wkeWebView webView, wkeDownload2Callback callback, void* param, "") \
     ITERATOR3(void, wkeOnConsole, wkeWebView webView, wkeConsoleCallback callback, void* param, "") \
     ITERATOR3(void, wkeSetUIThreadCallback, wkeWebView webView, wkeCallUiThread callback, void* param, "") \
     ITERATOR3(void, wkeOnLoadUrlBegin, wkeWebView webView, wkeLoadUrlBeginCallback callback, void* callbackParam, "") \
@@ -1011,15 +1072,17 @@ public:
     ITERATOR3(void, wkeOnDraggableRegionsChanged, wkeWebView webView, wkeDraggableRegionsChangedCallback callback, void* param, "") \
     ITERATOR3(void, wkeOnWillMediaLoad, wkeWebView webView, wkeWillMediaLoadCallback callback, void* param, "") \
     ITERATOR3(void, wkeOnStartDragging, wkeWebView webView, wkeStartDraggingCallback callback, void* param, "") \
+    ITERATOR3(void, wkeOnPrint, wkeWebView webView, wkeOnPrintCallback callback, void* param, "") \
     \
     ITERATOR3(void, wkeOnOtherLoad, wkeWebView webView, wkeOnOtherLoadCallback callback, void* param, "") \
     \
     ITERATOR1(bool, wkeIsProcessingUserGesture, wkeWebView webView, "") \
     \
-    ITERATOR2(void, wkeNetSetMIMEType, wkeNetJob jobPtr, char *type, "") \
+    ITERATOR2(void, wkeNetSetMIMEType, wkeNetJob jobPtr, const char* type, "") \
     ITERATOR2(const char*, wkeNetGetMIMEType, wkeNetJob jobPtr, wkeString mime, "") \
     ITERATOR4(void, wkeNetSetHTTPHeaderField, wkeNetJob jobPtr, wchar_t* key, wchar_t* value, bool response, "") \
     ITERATOR2(const char*, wkeNetGetHTTPHeaderField, wkeNetJob jobPtr, const char* key, "") \
+    ITERATOR2(const char*, wkeNetGetHTTPHeaderFieldFromResponse, wkeNetJob jobPtr, const char* key, "") \
     ITERATOR3(void, wkeNetSetData, wkeNetJob jobPtr, void *buf, int len, "调用此函数后,网络层收到数据会存储在一buf内,接收数据完成后响应OnLoadUrlEnd事件.#此调用严重影响性能,慎用" \
         "此函数和wkeNetSetData的区别是，wkeNetHookRequest会在接受到真正网络数据后再调用回调，并允许回调修改网络数据。"\
         "而wkeNetSetData是在网络数据还没发送的时候修改") \
@@ -1031,10 +1094,13 @@ public:
     ITERATOR1(void, wkeNetContinueJob, wkeNetJob jobPtr, "")\
     ITERATOR1(const char*, wkeNetGetUrlByJob, wkeNetJob jobPtr, "")\
     ITERATOR1(void, wkeNetCancelRequest, wkeNetJob jobPtr, "")\
+    ITERATOR1(BOOL, wkeNetHoldJobToAsynCommit, wkeNetJob jobPtr, "")\
     ITERATOR2(void, wkeNetChangeRequestUrl, wkeNetJob jobPtr, const char* url, "")\
-    ITERATOR1(void, wkeNetHoldJobToAsynCommit, wkeNetJob jobPtr, "")\
     \
     ITERATOR3(wkeWebUrlRequestPtr, wkeNetCreateWebUrlRequest, const utf8* url, const utf8* method, const utf8* mime, "")\
+    ITERATOR1(wkeWebUrlRequestPtr, wkeNetCreateWebUrlRequest2, const blinkWebURLRequestPtr request, "")\
+    ITERATOR2(blinkWebURLRequestPtr, wkeNetCopyWebUrlRequest, wkeNetJob jobPtr, bool needExtraData, "")\
+    ITERATOR1(void, wkeNetDeleteBlinkWebURLRequestPtr, blinkWebURLRequestPtr request, "")\
     ITERATOR3(void, wkeNetAddHTTPHeaderFieldToUrlRequest, wkeWebUrlRequestPtr request, const utf8* name, const utf8* value, "")\
     ITERATOR4(int, wkeNetStartUrlRequest, wkeWebView webView, wkeWebUrlRequestPtr request, void* param, const wkeUrlRequestCallbacks* callbacks, "")\
     ITERATOR1(int, wkeNetGetHttpStatusCode, wkeWebUrlResponsePtr response, "")\
@@ -1077,6 +1143,9 @@ public:
     \
     ITERATOR1(void, wkeUtilSetUiCallback, wkeUiThreadPostTaskCallback callback, "") \
     ITERATOR1(const utf8*, wkeUtilSerializeToMHTML, wkeWebView webView, "") \
+    ITERATOR3(const wkePdfDatas*, wkeUtilPrintToPdf, wkeWebView webView, wkeWebFrameHandle frameId, const wkePrintSettings* settings,"") \
+    ITERATOR3(const wkeMemBuf*, wkePrintToBitmap, wkeWebView webView, wkeWebFrameHandle frameId, const wkeScreenshotSettings* settings,"") \
+    ITERATOR1(void, wkeUtilRelasePrintPdfDatas, const wkePdfDatas* datas,"") \
     \
     ITERATOR2(void, wkeSetWindowTitle, wkeWebView webWindow, const utf8* title, "") \
     ITERATOR2(void, wkeSetWindowTitleW, wkeWebView webWindow, const wchar_t* title, "") \
@@ -1093,6 +1162,11 @@ public:
     ITERATOR3(void, wkeSetMediaPlayerFactory, wkeWebView webView, wkeMediaPlayerFactory factory, wkeOnIsMediaPlayerSupportsMIMEType callback,"") \
     \
     ITERATOR1(const utf8*, wkeUtilDecodeURLEscape, const utf8* url, "") \
+    ITERATOR1(const utf8*, wkeUtilEncodeURLEscape, const utf8* url, "") \
+    ITERATOR1(const utf8*, wkeUtilBase64Encode, const utf8* str, "") \
+    ITERATOR1(const utf8*, wkeUtilBase64Decode, const utf8* str, "") \
+    \
+    ITERATOR0(void, wkeRunMessageLoop, "") \
     \
     ITERATOR3(void, jsBindFunction, const char* name, jsNativeFunction fn, unsigned int argCount, "") \
     ITERATOR2(void, jsBindGetter, const char* name, jsNativeFunction fn, "") \
@@ -1203,29 +1277,28 @@ inline void wkeSetWkeDllPath(const wchar_t* dllPath)
     kWkeDllPath = dllPath;
 }
 
-inline void wkeInitializeEx(const wkeSettings* settings)
+inline int wkeInitializeEx(const wkeSettings* settings)
 {
     HMODULE hMod = LoadLibraryW(kWkeDllPath);
+    if (hMod) {
+        FN_wkeInitializeEx wkeInitializeExFunc = (FN_wkeInitializeEx)GetProcAddress(hMod, "wkeInitializeEx");
+        wkeInitializeExFunc(settings);
 
-    FN_wkeInitializeEx wkeInitializeExFunc = (FN_wkeInitializeEx)GetProcAddress(hMod, "wkeInitializeEx");
-    wkeInitializeExFunc(settings);
-
-    WKE_FOR_EACH_DEFINE_FUNCTION(WKE_GET_PTR_ITERATOR0, WKE_GET_PTR_ITERATOR1, WKE_GET_PTR_ITERATOR2, WKE_GET_PTR_ITERATOR3, \
-        WKE_GET_PTR_ITERATOR4, WKE_GET_PTR_ITERATOR5, WKE_GET_PTR_ITERATOR6, WKE_GET_PTR_ITERATOR11);
-
-    return;
+        WKE_FOR_EACH_DEFINE_FUNCTION(WKE_GET_PTR_ITERATOR0, WKE_GET_PTR_ITERATOR1, WKE_GET_PTR_ITERATOR2, WKE_GET_PTR_ITERATOR3, \
+            WKE_GET_PTR_ITERATOR4, WKE_GET_PTR_ITERATOR5, WKE_GET_PTR_ITERATOR6, WKE_GET_PTR_ITERATOR11);
+        return 1;
+    }
+    return 0;
 }
 
-inline void wkeInit()
+inline int wkeInit()
 {
-    wkeInitializeEx(((const wkeSettings*)0));
-    return;
+    return wkeInitializeEx(((const wkeSettings*)0));
 }
 
-inline void wkeInitialize()
+inline int wkeInitialize()
 {
-    wkeInitializeEx(((const wkeSettings*)0));
-    return;
+    return wkeInitializeEx(((const wkeSettings*)0));
 }
 
 #endif

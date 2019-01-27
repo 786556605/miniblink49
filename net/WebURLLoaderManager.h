@@ -120,11 +120,10 @@ public:
 
     blink::WebThread* getIoThread() const { return m_thread; }
 
-    //void setCookieJarFullPath(const WCHAR* path);
     WebCookieJarImpl* getShareCookieJar() const;
 
 private:
-    WebURLLoaderManager(const char* path);
+    WebURLLoaderManager(const char* cookieJarFullPath);
     ~WebURLLoaderManager();
 
     bool doCancel(JobHead* jobHeead, CancelledReason cancelledReason);
@@ -135,7 +134,7 @@ private:
     bool downloadOnIoThread();
     void removeFromCurlOnIoThread(int jobId);
 
-    void applyAuthenticationToRequest(WebURLLoaderInternal*, blink::WebURLRequest*);
+    void applyAuthenticationToRequest(WebURLLoaderInternal* job);
 
     int initializeHandleOnMainThread(WebURLLoaderInternal* job);
     void initializeHandleOnIoThread(int jobId, InitializeHandleInfo* info);

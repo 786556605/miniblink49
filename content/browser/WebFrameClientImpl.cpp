@@ -321,7 +321,7 @@ void WebFrameClientImpl::didFailProvisionalLoad(WebLocalFrame* frame, const WebU
         String failedReasonStr = String::format("error reason: %d, ", error.reason);
         failedReasonStr.append(error.localizedDescription);
         wke::CString failedReason(failedReasonStr);
-        wke::CString url(error.unreachableURL.string());
+        wke::CString url(error.domain); // error is set in WebURLLoaderManager::downloadOnIoThread
 
         if (error.isCancellation)
             result = WKE_LOADING_CANCELED;
@@ -519,7 +519,10 @@ void WebFrameClientImpl::didChangeManifest(WebLocalFrame*) { }
 void WebFrameClientImpl::didChangeDefaultPresentation(WebLocalFrame*) { }
 void WebFrameClientImpl::didChangeThemeColor() { }
 
-void WebFrameClientImpl::dispatchLoad() { }
+void WebFrameClientImpl::dispatchLoad()
+{
+    OutputDebugStringA("WebFrameClientImpl::dispatchLoad\n");
+}
 
 WebNavigationPolicy WebFrameClientImpl::decidePolicyForNavigation(const NavigationPolicyInfo& info)
 {
@@ -736,7 +739,7 @@ bool WebFrameClientImpl::runModalConfirmDialog(const WebString& message)
     bool needCall = true;
 #if (defined ENABLE_WKE) && (ENABLE_WKE == 1)
     wke::AutoDisableFreeV8TempObejct autoDisableFreeV8TempObejct;
-    if (m_webPage->wkeHandler().alertBoxCallback && m_webPage->getState() == pageInited) {
+    if (m_webPage->wkeHandler().confirmBoxCallback && m_webPage->getState() == pageInited) {
         needCall = false;
         wke::CString wkeMsg(message);
         return m_webPage->wkeHandler().confirmBoxCallback(m_webPage->wkeWebView(), m_webPage->wkeHandler().confirmBoxCallbackParam, &wkeMsg);

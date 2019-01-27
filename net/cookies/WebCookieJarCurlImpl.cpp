@@ -153,14 +153,47 @@ static void addMatchingCurlCookie(const char* cookie, const String& domain, cons
     cookies.append(strValue);
 }
 
+const char replaceEqualSing = (char)0x6;
+
+static String fixEqualSignInValue(Vector<char>* value)
+{
+    bool isOver = false;
+    for (size_t i = 0; i < value->size() && !isOver; ++i) {
+        char c = value->at(i);
+        if ('\"' != c)
+            continue;
+        
+        for (size_t j = i + 1; j < value->size(); ++j) {
+            c = value->at(j);
+            if ('=' == c) {
+                value->at(j) = replaceEqualSing;
+            } else if ('\"' == c) {
+                isOver = true;
+                break;
+            }
+        }
+    }
+    return String(value->data(), value->size());
+}
+
+static String restoreEqualSignInValue(const String& value)
+{
+    Vector<LChar> result;
+    for (size_t i = 0; i < value.length(); ++i) {
+        LChar c = value[i];
+        result.append(replaceEqualSing == c ? '=' : c);
+    }
+    return String::adopt(result);
+}
+
 static String getNetscapeCookieFormat(const KURL& url, const String& value)
 {
     // Constructs a cookie string in Netscape Cookie file format.
-
     if (value.isEmpty())
         return "";
 
-    String valueStr = WTF::ensureStringToUTF8String(value);
+    Vector<char> valueBuf = ensureStringToUTF8(value, false);
+    String valueStr = fixEqualSignInValue(&valueBuf);
 
     Vector<String> attributes;
     valueStr.split(';', false, attributes);
@@ -242,7 +275,7 @@ static String getNetscapeCookieFormat(const KURL& url, const String& value)
     cookieStr.append(secure + "\t");
     cookieStr.append(expiresStr + "\t");
     cookieStr.append(cookieName + "\t");
-    cookieStr.append(cookieValue);
+    cookieStr.append(restoreEqualSignInValue(cookieValue));
 
     return cookieStr.toString();
 }
@@ -535,7 +568,12 @@ String WebCookieJarImpl::getCookiesForSession(const KURL&, const KURL& url, bool
     return cookies;
 }
 
-WebCookieJarImpl::WebCookieJarImpl(std::string cookieJarFileName)
+WebCookieJarImpl* WebCookieJarImpl::create(const std::string& cookieJarFullPath)
+{
+    return new WebCookieJarImpl(cookieJarFullPath);
+}
+
+WebCookieJarImpl::WebCookieJarImpl(const std::string& cookieJarFullPath)
 {
     m_curlShareHandle = curl_share_init();
     curl_share_setopt(m_curlShareHandle, CURLSHOPT_SHARE, CURL_LOCK_DATA_COOKIE);
@@ -543,7 +581,7 @@ WebCookieJarImpl::WebCookieJarImpl(std::string cookieJarFileName)
     curl_share_setopt(m_curlShareHandle, CURLSHOPT_LOCKFUNC, curl_lock_callback);
     curl_share_setopt(m_curlShareHandle, CURLSHOPT_UNLOCKFUNC, curl_unlock_callback);
 
-    m_cookieJarFileName = cookieJarFileName;
+    m_cookieJarFileName = cookieJarFullPath;
     m_dirty = false;
 }
 
@@ -553,17 +591,17 @@ WebCookieJarImpl::~WebCookieJarImpl()
         curl_share_cleanup(m_curlShareHandle);
 }
 
-void WebCookieJarImpl::setCookieJarFullPath(const char* path)
-{
-    WTF::Mutex* mutex = sharedResourceMutex(CURL_LOCK_DATA_COOKIE);
-    WTF::Locker<WTF::Mutex> locker(*mutex);
-
-    if (!path)
-        return;
-
-    m_cookieJarFileName = path;// std::string(&jarPathA[0], jarPathA.size());
-    m_dirty = true;
-}
+// void WebCookieJarImpl::setCookieJarFullPath(const char* path)
+// {
+//     WTF::Mutex* mutex = sharedResourceMutex(CURL_LOCK_DATA_COOKIE);
+//     WTF::Locker<WTF::Mutex> locker(*mutex);
+// 
+//     if (!path)
+//         return;
+// 
+//     m_cookieJarFileName = path;// std::string(&jarPathA[0], jarPathA.size());
+//     m_dirty = true;
+// }
 
 std::string WebCookieJarImpl::getCookieJarFullPath()
 {
@@ -573,21 +611,6 @@ std::string WebCookieJarImpl::getCookieJarFullPath()
     flushCurlCookie(nullptr);
     return m_cookieJarFileName;
 }
-
-// char* getCookieJarPath()
-// {
-//     WTF::Mutex* mutex = sharedResourceMutex(CURL_LOCK_DATA_COOKIE);
-//     WTF::Locker<WTF::Mutex> locker(*mutex);
-// 
-//     if (g_cookieJarPath)
-//         return g_cookieJarPath;
-// 
-//     char* cookieJarPathStr = "cookies.dat";
-//     g_cookieJarPath = (char*)malloc(strlen(cookieJarPathStr) + 1);
-//     strcpy(g_cookieJarPath, cookieJarPathStr);
-// 
-//     return g_cookieJarPath;
-// }
 
 //----WebCookieJar----
 
@@ -615,17 +638,5 @@ void WebCookieJarImpl::setCookieFromWinINet(const KURL& url, const Vector<char>&
 {
     notImplemented();
 }
-
-//////////////////////////////////////////////////////////////////////////
-
-// WebCookieJarImpl* WebCookieJarImpl::getShare()
-// {
-//     if (m_inst)
-//         return m_inst;
-// 
-//     CURLSH* curlsh = net::WebURLLoaderManager::sharedInstance()->getCurlShareHandle();
-//     m_inst = new WebCookieJarImpl(curlsh, net::cookieJarPath(), false);
-//     return m_inst;
-// }
 
 } // namespace content

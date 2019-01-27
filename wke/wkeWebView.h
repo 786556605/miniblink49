@@ -72,6 +72,9 @@ struct CWebViewHandler {
     wkeDownloadCallback downloadCallback;
     void* downloadCallbackParam;
 
+    wkeDownload2Callback download2Callback;
+    void* download2CallbackParam;
+
     wkeNetResponseCallback netResponseCallback;
     void* netResponseCallbackParam;
 
@@ -107,6 +110,9 @@ struct CWebViewHandler {
 
     wkeStartDraggingCallback startDraggingCallback;
     void* startDraggingCallbackParam;
+
+    wkeOnPrintCallback printCallback;
+    void* printCallbackParam;
     
     bool isWke; // 是否是使用的wke接口
 };
@@ -258,6 +264,8 @@ public:
     virtual void onDocumentReady(wkeDocumentReadyCallback callback, void* callbackParam);
     void onDocumentReady2(wkeDocumentReady2Callback callback, void* callbackParam);
     virtual void onDownload(wkeDownloadCallback callback, void* callbackParam);
+    void onDownload2(wkeDownload2Callback callback, void* callbackParam);
+    
     virtual void onConsole(wkeConsoleCallback callback, void* callbackParam);
     virtual void onCallUiThread(wkeCallUiThread callback, void* callbackParam);
     void onNetResponse(wkeNetResponseCallback callback, void* callbackParam);
@@ -270,6 +278,8 @@ public:
 
     void onStartDragging(wkeStartDraggingCallback callback, void* callbackParam);
     
+    void onPrint(wkeOnPrintCallback callback, void* param);
+
     void onOtherLoad(wkeOnOtherLoadCallback callback, void* callbackParam);
 
     void onDraggableRegionsChanged(wkeDraggableRegionsChangedCallback callback, void* param);
@@ -301,7 +311,10 @@ public:
 
     CURLSH* getCurlShareHandle();
     std::string getCookieJarPath();
+    void setCookieJarFullPath(const utf8* path);
     net::WebCookieJarImpl* getCookieJar();
+
+    void setLocalStorageFullPath(const utf8* path);
 
     std::set<jsValue>& getPersistentJsValue() { return m_persistentJsValue; }
 
